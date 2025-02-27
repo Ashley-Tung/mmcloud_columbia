@@ -34,9 +34,6 @@ link_paths() {
         # Ipython folder
         ln -s "${efs_path}/.ipython" "${local_path}/.ipython"
 
-        # Git repositories
-        ln -s "${efs_path}/ghq" "${local_path}/ghq"
-
         # Cache
         ln -s "${efs_path}/.cache" "${local_path}/.cache"
 
@@ -58,6 +55,11 @@ if [ -f "\$HOME/.bashrc" ]; then
 fi
 fi
 EOF
+    fi
+
+    if [[ ${MODE} != "oem_packages" ]]; then
+        # Git repositories
+        ln -s "${efs_path}/ghq" "${local_path}/ghq"
     fi
 
     # ln -s ${efs_path}/.mamba ${local_path}/.mamba
