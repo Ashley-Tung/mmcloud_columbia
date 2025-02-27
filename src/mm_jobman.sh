@@ -39,6 +39,7 @@ user=""
 password=""
 vm_policy=""
 extra_parameters=""
+parallel_commands_given=""
 
 # Batch-specific optional values
 job_script=""
@@ -164,6 +165,7 @@ while (( "$#" )); do
             done
             ;;
         --download-include|--mountOpt|--env)
+            current_flag="$1"
             shift
             while [ $# -gt 0 ] && [[ $1 != -* ]]; do
                 IFS='' read -ra ARG <<< "$1"
@@ -446,12 +448,14 @@ check_params() {
 # If it is an interactive job, prompt for user and password if not provided
 # If it is a batch job, will check if already logged in
 login() {
+    local output=""
+    local address=""
     echo ""
 
     # For batch job
     if [[ "$batch_mode" == "true" ]]; then
-        local output=$($float_executable login --info)
-        local address=$(echo "$output" | grep -o 'address: [0-9.]*' | awk '{print $2}')
+        output=$($float_executable login --info)
+        address=$(echo "$output" | grep -o 'address: [0-9.]*' | awk '{print $2}')
         if [ "$address" == "" ];then
             echo -e "\n[ERROR] No opcenter logged in to. Did you log in?"
             exit 1
@@ -560,114 +564,43 @@ set_env_parameters() {
     fi
 
     for param in "${env_parameters_array[@]}"; do
-        env_parameters+="--env $param"
+        env_parameters+=" --env $param"
     done
 
     echo -e "${env_parameters}"
 }
 
+# Determine VM policy
+determine_vm_policy() {
+    local lowercase_vm_policy=""
+
+    if [[ -z $vm_policy ]]; then
+        if [[ ${batch_mode} == "true" ]]; then
+            vm_policy_command="[onDemand=true]"
+        else
+            vm_policy_command="[spotOnly=true,retryInterval=900s]"
+        fi
+    else
+        lowercase_vm_policy=$(echo "$vm_policy" | tr '[:upper:]' '[:lower:]')
+        if [ "${lowercase_vm_policy}" == "spotonly" ]; then
+            vm_policy_command="[spotOnly=true,retryInterval=900s]"
+        elif [ "${lowercase_vm_policy}" == "ondemand" ]; then
+            vm_policy_command="[onDemand=true]"
+        elif [ "${lowercase_vm_policy}" == "spotfirst" ]; then
+            vm_policy_command="[spotFirst=true]"
+        else
+            echo ""
+            echo "Invalid VM Policy setting '$vm_policy'. Please use 'spotOnly', 'onDemand', or 'spotFirst'"
+            return 1
+        fi
+    fi
+
+    echo "${vm_policy_command}"
+}
+
 # # # Helper functions for batch jobs # # #
-create_download_commands() {
-  local download_cmd=""
-
-    for i in "${!download_local[@]}"; do
-      # If local folder has a trailing slash, we are copying into a folder, therefore we make the folder
-      if [[ ${download_local[$i]} =~ /$ ]]; then
-        download_cmd+="mkdir -p ${download_local[$i]%\/}\n"
-      fi
-      download_cmd+="aws s3 cp s3://${download_remote[$i]} ${download_local[$i]} --recursive"
-
-      # Separate include commands with space
-      if [ ${#download_include[@]} -gt 0 ]; then
-        # Split by space
-        IFS=' ' read -ra INCLUDES <<< "${download_include[$i]}"
-        if [ ${#INCLUDES[@]} -gt 0 ]; then
-          # If an include command is used, we want to make sure we don't include the entire folder
-          download_cmd+=" --exclude '*'"
-        fi
-        for j in "${!INCLUDES[@]}"; do
-          download_cmd+=" --include '${INCLUDES[$j]}'"
-        done
-      fi
-      download_cmd+="\n"
-    done
-
-  download_cmd=${download_cmd%\\n}
-  echo -e "${download_cmd}"
-}
-
-create_upload_commands() {
-    local upload_cmd=""
-
-    for i in "${!upload_local[@]}"; do
-        upload_cmd+="mkdir -p ${upload_local[$i]%\/}\n"
-        local upload_folder=${upload_remote[$i]%\/}
-        if [[ ${upload_local[$i]} =~ /$ ]]; then
-            upload_cmd+="aws s3 sync ${upload_local[$i]} s3://${upload_folder}\n"
-        else  
-            local last_folder=$(basename "${upload_local[$i]}")
-            upload_cmd+="aws s3 sync ${upload_local[$i]} s3://${upload_folder}/$last_folder\n"
-        fi
-    done
-
-    upload_cmd=${upload_cmd%\\n}
-    echo -e "${upload_cmd}"
-}
-
-calculate_max_parallel_jobs() {
-    # Required minimum resources per job
-    min_cores_per_cmd=$1  # Minimum CPU cores required per job
-    min_mem_per_cmd=$2    # Minimum memory required per job in GB
-
-    # Available system resources
-    available_cores=$(lscpu | grep "CPU(s):" | head -n 1 | awk '{print $2}')  # Total available CPU cores
-    available_memory_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-    available_memory_gb=$((available_memory_kb / 1024 / 1024))
-
-    # Initialize max_parallel_jobs to default parallen_commands
-    max_parallel_jobs=$3
-    max_jobs_by_cpu=0
-    max_jobs_by_mem=0
-
-    # Calculate the maximum number of jobs based on CPU constraints, if applicable
-    if [ -n "$min_cores_per_cmd" ] && [ "$min_cores_per_cmd" -gt 0 ]; then
-        max_jobs_by_cpu=$((available_cores / min_cores_per_cmd))
-        if [ "$max_jobs_by_cpu" -eq 0 ]; then
-            max_jobs_by_cpu=1  # Ensure at least 1 job can run if the division results in 0
-        fi
-    fi
-
-    # Calculate the maximum number of jobs based on memory constraints, if applicable
-    if [ -n "$min_mem_per_cmd" ] && [ "$min_mem_per_cmd" -gt 0 ]; then
-        max_jobs_by_mem=$((available_memory_gb / min_mem_per_cmd))
-        if [ "$max_jobs_by_mem" -eq 0 ]; then
-            max_jobs_by_mem=1  # Ensure at least 1 job can run if the division results in 0
-        fi
-    fi
-
-    # Determine the maximum number of parallel jobs based on the more restrictive resource (CPU or memory)
-    if [ "$max_jobs_by_cpu" -gt 0 ] && [ "$max_jobs_by_mem" -gt 0 ]; then
-        max_parallel_jobs=$(( max_jobs_by_cpu < max_jobs_by_mem ? max_jobs_by_cpu : max_jobs_by_mem ))
-    elif [ "$max_jobs_by_cpu" -gt 0 ]; then
-        max_parallel_jobs=$max_jobs_by_cpu
-    elif [ "$max_jobs_by_mem" -gt 0 ]; then
-        max_parallel_jobs=$max_jobs_by_mem
-    fi
-
-    if [ "$max_parallel_jobs" -eq 0 ]; then
-        max_parallel_jobs=1
-    fi
-
-    echo -e "${available_cores} ${available_memory_gb} ${max_parallel_jobs}"
-}
-
 submit_each_line_with_float() {
     local script_file="$1"
-    local download_cmd=""
-    local upload_cmd=""
-    local download_mkdir=""
-    local upload_mkdir=""
-    local dataVolume_params=""
 
     # Check if the script file exists
     if [ ! -f "$script_file" ]; then
@@ -682,21 +615,6 @@ submit_each_line_with_float() {
         echo "Script file is empty: $script_file"
         return 0
     fi
-
-    # Only create download and upload commands if there are corresponding parameters
-    if [ ${#download_local[@]} -ne 0 ]; then
-        download_cmd=$(create_download_commands)
-    fi
-    if [ ${#upload_local[@]} -ne 0 ]; then
-        upload_cmd=$(create_upload_commands)
-    fi
-
-    # Separate out the mkdir commands
-    download_mkdir=$(echo -e "$download_cmd" | grep 'mkdir')
-    upload_mkdir=$(echo -e "$upload_cmd" | grep 'mkdir')
-    # Remove mkdir commands from the original command
-    download_cmd=$(echo -e "$download_cmd" | grep -v 'mkdir')
-    upload_cmd=$(echo -e "$upload_cmd" | grep -v 'mkdir')
 
     # Read all lines from the script file into an array
     all_commands=()
@@ -736,91 +654,44 @@ submit_each_line_with_float() {
         # Begin jobs script with bind_mount.sh
         printf "$script_dir/bind_mount.sh" > "${job_filename}"
 
-        # Create the job script using heredoc
-        calculate_max_parallel_jobs_def=$(declare -f calculate_max_parallel_jobs)
-        submission_script=$(cat << EOF
-# Function definition for calculate_max_parallel_jobs
-${calculate_max_parallel_jobs_def}
-
-# Create directories if they don't exist for download
-${download_mkdir}
-# Create directories if they don't exist for upload
-${upload_mkdir}
-# Create directories if they don't exist for cwd
-mkdir -p ${cwd}
-
-# Execute the download commands to fetch data from S3
-${download_cmd}
-
-# Change to the specified working directory
-cd ${cwd}
-
-# Compute parallel command numbers based on runtime values
-read available_cores available_memory_gb num_parallel_commands < <(calculate_max_parallel_jobs ${min_cores_per_command} ${min_mem_per_command} ${parallel_commands})
-echo "Available CPU cores: \$available_cores"
-echo "Available Memory: \$available_memory_gb GB"
-echo "Maximum parallel jobs: \$num_parallel_commands"
-
-# Initialize a flag to track command success, which can be changed in no_fail
-command_failed=0
-
-# Conditional execution based on num_parallel_commands and also length of commands
-commands_to_run=(${commands[@]})
-if [[ \$num_parallel_commands -gt 1 && ${#commands[*]} -gt 1 ]]; then
-    printf "%%s\\\\n" "\${commands_to_run[@]}"  | parallel -j \$num_parallel_commands ${no_fail_parallel}
-else
-    printf "%%s\\\\n" "\${commands_to_run[@]}" | while IFS= read -r cmd; do
-        eval \$cmd ${no_fail}
-    done
-fi
-
-# Always execute the upload commands to upload data to S3
-${upload_cmd}
-
-# Check if any command failed
-if [ \$command_failed -eq 1 ]; then
-    exit 1
-fi
-EOF
-)
-        # Append job specific code
-        printf "${submission_script}" >> "${job_filename}"
+        "${script_dir}/generate_job_script.sh" \
+            --commands "${commands[*]// /;}" \
+            --cwd "${cwd}" \
+            --download_local "${download_local[*]// /;}" \
+            --upload_local "${upload_local[*]// /;}" \
+            --download_remote "${download_remote[*]// /;}" \
+            --download_include "${download_include[*]// /;}" \
+            --upload_remote "${upload_remote[*]// /;}" \
+            --job-filename "${job_filename}" \
+            --min-cores-per-command "${min_cores_per_command}" \
+            --min-mem-per-command "${min_mem_per_command}" \
+            --no-fail "${no_fail}" \
+            --no-fail-parallel "${no_fail_parallel}" \
+            --parallel-commands "${parallel_commands}"
 
         # Submit the job and retrieve job ID
         # Execute or echo the full command
         # publish parameters is deliberately omiteed
-        float_submit_output=$("{script_dir}/float_wrapper.sh" \
-            --float_executable="${float_executable}" \
-            --opcenter="${opcenter}" \
-            --gateway="${gateway}" \
-            --image="${image}" \
-            --core="${core}" \
-            --mem="${mem}" \
-            --securityGroup="${securityGroup}" \
-            --vmPolicy="${vm_policy}" \
-            --dataVolumeOption="${dataVolume_params} ${volumeMount_params}" \
-            --imageVolSize="${image_vol_size}" \
-            --rootVolSize="${root_vol_size}" \
-            --host-script="${host_script}" \
-            --job-script="${job_filename}" \
-            --env_parameters="${env_parameters}" \
-            --extra_parameters="${extra_parameters}" \
-            --job-name="${job_name}_${j}" \
-            --dryrun="${dryrun}")
+        "${script_dir}/float_wrapper.sh" \
+            --float-executable "${float_executable}" \
+            --opcenter "${opcenter}" \
+            --gateway "${gateway}" \
+            --image "${image}" \
+            --core "${core}" \
+            --mem "${mem}" \
+            --securityGroup "${securityGroup}" \
+            --vmPolicy "${vm_policy}" \
+            --dataVolumeOption "${dataVolume_params// /;};${volumeMount_params// /;}" \
+            --imageVolSize "${image_vol_size}" \
+            --rootVolSize "${root_vol_size}" \
+            --host-script "${host_script}" \
+            --job-script "${job_filename}" \
+            --dryrun "${dryrun}" \
+            --ide "batch" \
+            --env_parameters "${env_parameters// /;}" \
+            --extra_parameters "${extra_parameters// /;}" \
+            --job-name "${job_name}_${j}"
 
-        if [[ ${dryrun} == true ]]; then
-            exit 0
-        else
-            jobid=$(echo "$float_submit_output" | grep 'id:' | awk -F'id: ' '{print $2}' | awk '{print $1}' || true)
-        fi
-
-        if [[ -z "$jobid" ]]; then
-            echo "Error returned from float submission command! Exiting..."
-            exit 1
-        fi
-
-        echo ""
-        echo "JOB ID: $jobid"
         rm -rf "${TMPDIR:-/tmp}/${script_file%.*}"
     done
 }
@@ -851,6 +722,7 @@ prompt_user() {
 
 # Validate mode combinations
 determine_running_jobs() {
+    published_port=$(echo "$publish" | cut -d':' -f1)
     # Allowable combinations: oem-packages and mount-packages
     if [[ -n "$shared_admin" ]]; then
         running_int_jobs=$("${float_executable}" list -a "${opcenter}" -f "status=Executing or status=Floating or status=Suspended or status=Suspending or status=Starting or status=Initializing" | awk '{print $4}' | grep -v -e '^$' -e 'NAME' || true)
@@ -879,14 +751,12 @@ determine_running_jobs() {
 
 # Adjust publish port if not set by user and by ide
 determine_ports() {
-    if [[ "$publish_set" == false ]]; then
-        if [[ "$ide" == "rstudio" ]]; then
-            publish="8787:8787"
-        elif [[ "$ide" == "vscode" ]]; then
-            publish="8989:8989"
-        else
-            publish="8888:8888"
-        fi
+    if [[ "$ide" == "rstudio" ]]; then
+        publish="8787:8787"
+    elif [[ "$ide" == "vscode" ]]; then
+        publish="8989:8989"
+    else
+        publish="8888:8888"
     fi
     echo -e "${publish}"
 }
@@ -924,139 +794,31 @@ give_tmate_warning () {
     fi
 }
 
-# For interactive jobs - get gateway IP of job
-get_public_ip() {
-    local jobid="$1"
-    local IP_ADDRESS=""
-    while [[ -z "$IP_ADDRESS" ]]; do
-        IP_ADDRESS=$("$float_executable" show -j "$jobid" | grep -A 1 portMappings | tail -n 1 | awk '{print $4}' || true)
-        if [[ -n "$IP_ADDRESS" ]]; then
-            echo "$IP_ADDRESS"
-        else
-            sleep 1s
-        fi
-    done
-}
-
-# For interactive jobs - get tmate url
-get_tmate_session() {
-    local jobid="$1"
-    echo "[$(date)]: Waiting for the job to execute and retrieve tmate web session (~5min)..."
-    while true; do
-        url=$("$float_executable" log -j "$jobid" cat stdout.autosave | grep "web session:" | head -n 1 || true)  
-        if [[ -n "$url" ]]; then
-            local tmate_session=$(echo "$url" | awk '{print $3}')
-            echo "To access the server, copy this URL in a browser: $tmate_session"
-            echo "To access the server, copy this URL in a browser: $tmate_session" > "${jobid}_tmate_session.log"
-
-            local ssh=$("$float_executable" log -j "$jobid" cat stdout.autosave | grep "ssh session:" | head -n 1 || true)
-            local ssh_tmate=$(echo "$ssh" | awk '{print $3,$4}')
-            echo "SSH session: $ssh_tmate"
-            echo "SSH session: $ssh_tmate" >> "${jobid}_tmate_session.log"
-            break
-        else
-            sleep 60
-            echo "[$(date)]: Still waiting for the job to execute..."
-        fi
-    done
-}
-
-# For interactive jobs - get jupyter link and token
-get_jupyter_token() {
-    local jobid="$1"
-    local ip_address="$2"
-    echo "[$(date)]: Waiting for the job to execute and retrieve Jupyter token (~10min)..."
-    while true; do
-        url=$("$float_executable" log -j "$jobid" cat stderr.autosave | grep token= | head -n 1 || true)
-        no_jupyter=$("$float_executable" log -j "$jobid" cat stdout.autosave | grep "JupyterLab is not available." | head -n 1 || true)
-
-        if [[ $url == *token=* ]]; then
-            local token=$(echo "$url" | sed -E 's|.*http://[^/]+/(lab\?token=[a-zA-Z0-9]+).*|\1|')
-            local new_url="http://$ip_address/$token"
-            echo "To access the server, copy this URL in a browser: $new_url"
-            echo "To access the server, copy this URL in a browser: $new_url" > "${jobid}_jupyter.log"
-            break
-        elif [[ -n $no_jupyter ]]; then
-            echo "[$(date)]: WARNING: No JupyterLab installed. Falling back to tmate session."
-            get_tmate_session "$jobid"
-            break
-        else
-            sleep 60
-            echo "[$(date)]: Still waiting for the job to generate token..."
-        fi
-    done
-}
-
 # Submit job
 submit_interactive_job() {
     # Submit the job and retrieve job ID
     # Execute or echo the full command
-    float_submit_output=$("${script_dir}/float_wrapper.sh" \
-        --float_executable="${float_executable}" \
-        --core="${core}" \
-        --gateway="${gateway}" \
-        --image="${image}" \
-        --mem="${mem}" \
-        --opcenter="${opcenter}" \
-        --publish="${publish}" \
-        --securityGroup="${securityGroup}" \
-        --vmPolicy="${vm_policy}" \
-        --dataVolumeOption="${dataVolume_params} ${volumeMount_params}" \
-        --imageVolSize="${image_vol_size}" \
-        --rootVolSize="${root_vol_size}" \
-        --host-script="${host_script}" \
-        --job-script="${script_dir}/bind_mount.sh" \
-        --dryrun="${dryrun}" \
-        --env_parameters="${env_parameters}" \
-        --extra_parameters="${extra_parameters}" \
-        --job-name="${job_name}")
-
-    if [[ ${dryrun} == true ]]; then
-        exit 0
-    else
-        jobid=$(echo "$float_submit_output" | grep 'id:' | awk -F'id: ' '{print $2}' | awk '{print $1}' || true)
-    fi
-
-    if [[ -z "$jobid" ]]; then
-        echo "Error returned from float submission command! Exiting..."
-        exit 1
-    fi
-    echo ""
-    echo "JOB ID: $jobid"
-
-    # Wait for the job to execute and retrieve connection info
-    case "$ide" in
-        tmate)
-            IP_ADDRESS=$(get_public_ip "$jobid")
-            get_tmate_session "$jobid"
-            ;;
-        jupyter|jupyter-lab)
-            IP_ADDRESS=$(get_public_ip "$jobid")
-            get_jupyter_token "$jobid" "$IP_ADDRESS"
-            ;;
-        rstudio)
-            IP_ADDRESS=$(get_public_ip "$jobid")
-            echo "To access RStudio Server, navigate to http://$IP_ADDRESS in your web browser."
-            echo "Please give the instance about 5 minutes to start RStudio"
-            echo "RStudio Server URL: http://$IP_ADDRESS" > "${jobid}_rstudio.log"
-            ;;
-        vscode)
-            IP_ADDRESS=$(get_public_ip "$jobid")
-            echo "To access code-server, navigate to http://$IP_ADDRESS in your web browser."
-            echo "Please give the instance about 5 minutes to start vscode"
-            echo "code-server URL: http://$IP_ADDRESS" > "${jobid}_code-server.log"
-            ;;
-        *)
-            echo "Unrecognized IDE specified: $ide"
-            ;;
-    esac
-
-    # Output suspend command
-    suspend_command="$float_executable suspend -j $jobid"
-    echo "Suspend your environment when you do not need it by running:"
-    echo "$suspend_command"
-    echo "$suspend_command" >> "${jobid}_${ide}.log"
-
+    "${script_dir}/float_wrapper.sh" \
+        --float-executable "${float_executable}" \
+        --core "${core}" \
+        --gateway "${gateway}" \
+        --image "${image}" \
+        --mem "${mem}" \
+        --opcenter "${opcenter}" \
+        --publish "${publish}" \
+        --securityGroup "${securityGroup}" \
+        --vmPolicy "${vm_policy}" \
+        --dataVolumeOption "${dataVolume_params// /;};${volumeMount_params// /;}" \
+        --imageVolSize "${image_vol_size}" \
+        --rootVolSize "${root_vol_size}" \
+        --host-script "${host_script}" \
+        --job-script "${script_dir}/bind_mount.sh" \
+        --dryrun "${dryrun}" \
+        --env_parameters "${env_parameters// /;}" \
+        --extra_parameters "${extra_parameters// /;}" \
+        --ide "${ide}" \
+        --job-name "${job_name}" \
+        --verbose
 }
 #################################################
 
@@ -1089,12 +851,11 @@ if [[ "$batch_mode" == "true" ]]; then
 elif [[ "$interactive_mode" == "true" ]]; then
     echo "Starting interactive mode..."
 
-    determine_running_jobs
-
     # Additional helper functions
     publish=$(determine_ports)
+    determine_running_jobs
     job_name=$(determine_job_name)
-    give_tmate_warning
+    # give_tmate_warning
 
     submit_interactive_job
 fi
