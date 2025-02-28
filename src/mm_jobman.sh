@@ -197,7 +197,8 @@ while (( "$#" )); do
                 shift
             done
             ;;
-        -*|--*=)  # Unsupported flags
+        -h|--help) usage; exit 0 ;;
+        -*)  # Unsupported flags
             extra_parameters+="$1"  # Add the unsupported flag to extra_parameters
             shift  # Move past the flag
             # We expect the user to understand float cli commands if using this option
@@ -208,7 +209,6 @@ while (( "$#" )); do
                 shift
             done
             ;;
-        -h|--help) usage; exit 0 ;;
         *) echo "Unknown parameter passed: $1"; usage; exit 1 ;;
     esac
 done
@@ -855,7 +855,7 @@ elif [[ "$interactive_mode" == "true" ]]; then
     publish=$(determine_ports)
     determine_running_jobs
     job_name=$(determine_job_name)
-    # give_tmate_warning
+    give_tmate_warning
 
     submit_interactive_job
 fi

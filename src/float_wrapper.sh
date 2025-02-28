@@ -20,16 +20,20 @@ get_public_ip() {
 # For interactive jobs - get tmate url
 get_tmate_session() {
     local jobid="$1"
+    local tmate_session=""
+    local ssh=""
+    local ssh_tmate=""
+
     echo "[$(date)]: Waiting for the job to execute and retrieve tmate web session (~5min)..."
     while true; do
         url=$("$float_executable" log -j "$jobid" cat stdout.autosave | grep "web session:" | head -n 1 || true)  
         if [[ -n "$url" ]]; then
-            local tmate_session=$(echo "$url" | awk '{print $3}')
+            tmate_session=$(echo "$url" | awk '{print $3}')
             echo "To access the server, copy this URL in a browser: $tmate_session"
             echo "To access the server, copy this URL in a browser: $tmate_session" > "${jobid}_tmate_session.log"
 
-            local ssh=$("$float_executable" log -j "$jobid" cat stdout.autosave | grep "ssh session:" | head -n 1 || true)
-            local ssh_tmate=$(echo "$ssh" | awk '{print $3,$4}')
+            ssh=$("$float_executable" log -j "$jobid" cat stdout.autosave | grep "ssh session:" | head -n 1 || true)
+            ssh_tmate=$(echo "$ssh" | awk '{print $3,$4}')
             echo "SSH session: $ssh_tmate"
             echo "SSH session: $ssh_tmate" >> "${jobid}_tmate_session.log"
             break
@@ -44,14 +48,17 @@ get_tmate_session() {
 get_jupyter_token() {
     local jobid="$1"
     local ip_address="$2"
+    local token=""
+    local new_url=""
+
     echo "[$(date)]: Waiting for the job to execute and retrieve Jupyter token (~10min)..."
     while true; do
         url=$("$float_executable" log -j "$jobid" cat stderr.autosave | grep token= | head -n 1 || true)
         no_jupyter=$("$float_executable" log -j "$jobid" cat stdout.autosave | grep "JupyterLab is not available." | head -n 1 || true)
 
         if [[ $url == *token=* ]]; then
-            local token=$(echo "$url" | sed -E 's|.*http://[^/]+/(lab\?token=[a-zA-Z0-9]+).*|\1|')
-            local new_url="http://$ip_address/$token"
+            token=$(echo "$url" | sed -E 's|.*http://[^/]+/(lab\?token=[a-zA-Z0-9]+).*|\1|')
+            new_url="http://$ip_address/$token"
             echo "To access the server, copy this URL in a browser: $new_url"
             echo "To access the server, copy this URL in a browser: $new_url" > "${jobid}_jupyter.log"
             break
@@ -144,10 +151,13 @@ float_args+=(
     "${extra_parameters}"
 )
 
+# Reparse arguments to separate them properly
+IFS=' ' read -ra float_args_array <<< "${float_args[*]}"
+
 if [[ -n "${verbose}" ]]; then
     echo ""
     echo "#-------------"
-    echo "${float_executable} submit ${float_args[*]}"
+    echo "${float_executable} submit ${float_args_array[*]}"
     echo "#-------------"
 fi
 
@@ -157,7 +167,7 @@ if [[ ${dryrun} == true ]]; then
     fi
     exit 0
 else
-    jobid=$(echo "yes" | "${float_executable}" submit "${float_args[*]}" | grep 'id:' | awk -F'id: ' '{print $2}' | awk '{print $1}' || true)
+    jobid=$(echo "yes" | "${float_executable}" submit "${float_args_array[@]}" | grep 'id:' | awk -F'id: ' '{print $2}' | awk '{print $1}' || true)
 fi
 
 if [[ -z "$jobid" ]]; then
