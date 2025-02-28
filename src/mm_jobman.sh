@@ -15,7 +15,7 @@ efs_ip=""
 # Modes
 batch_mode=""
 interactive_mode=""
-shared_admin="" # For updating shared packages in interactive jobs
+oem_admin="" # For updating shared packages in interactive jobs
 mount_packages="" # For accessing one's own packages in interactive and batch jobs
 oem_packages="" # For accessing shared packages in interactive and batch jobs. Default.
 
@@ -98,7 +98,7 @@ usage() {
     echo "  --suspend-off                         For Jupyter jobs, turn off the auto-suspension feature"
     echo "  -pub, --publish <ports>               Set the port publishing in the form of port:port"
     echo "  --entrypoint <dir>                    Set entrypoint of interactive job - please give Github link"
-    echo "  --shared-admin                        Run in admin mode to make changes to shared packages in interactive mode"
+    echo "  --oem-admin                        Run in admin mode to make changes to shared packages in interactive mode"
     echo ""
 
     echo "Global Options:"
@@ -144,7 +144,7 @@ while (( "$#" )); do
         --entrypoint) entrypoint="$2"; shift 2;;
         --idle) idle_time="$2"; shift 2;;
         --suspend-off) suspend_off=true; shift ;;
-        --shared-admin) shared_admin=true; shift ;;
+        --oem-admin) oem_admin=true; shift ;;
         --mount-packages) mount_packages=true; shift ;;
         --oem-packages) oem_packages=true; shift ;;
         --dryrun) dryrun=true; shift ;;
@@ -264,9 +264,9 @@ check_conflicting_params() {
     local conflicting_params=""
     local is_conflicting=false
 
-    if [[ -n $shared_admin && (-n "$mount_packages" || -n "$oem_packages") ]]; then
+    if [[ -n $oem_admin && (-n "$mount_packages" || -n "$oem_packages") ]]; then
         echo ""
-        echo "Error: --shared-admin cannot be used with the other package modes."
+        echo "Error: --oem-admin cannot be used with the other package modes."
         exit 1
     fi
     if [[ -n "$mount_packages" && -n "$oem_packages" ]]; then
@@ -278,8 +278,8 @@ check_conflicting_params() {
     # Check if using interactive-specific parameters for batch mode
     if [[ "$batch_mode" == "true" ]]; then
         # If the interactive mode variables are populated, return error
-        if [[ -n "$shared_admin" ]]; then
-            conflicting_params+="--shared-admin "
+        if [[ -n "$oem_admin" ]]; then
+            conflicting_params+="--oem-admin "
             is_conflicting=true
         fi
         if [[ "$idle_time" != 7200 ]]; then
@@ -365,19 +365,19 @@ check_params() {
         exit 1
     # However, if neither are specified, we will be in the default tmate interactive job in oem-packages mode
     elif [ -z "$ide" ] && [ -z "$job_script" ]; then
-        # It's possible for users to do `--shared-admin` when ide and job script are not defined.
-        # If shared-admin is defined, set the right parameters
-        if [ -z "$shared_admin" ]; then
+        # It's possible for users to do `--oem-admin` when ide and job script are not defined.
+        # If oem-admin is defined, set the right parameters
+        if [ -z "$oem_admin" ]; then
             echo ""
             echo "Warning: Neither an IDE nor a job script was specified. Starting interactive tmate job."
             interactive_mode="true"
             ide="tmate"
         else
             echo ""
-            echo "Warning: Shared-admin mode was specified without ide or job script. Starting interactive tmate job in shared-admin mode"
+            echo "Warning: Oem-admin mode was specified without ide or job script. Starting interactive tmate job in oem-admin mode"
             interactive_mode="true"
             ide="tmate"
-            shared_admin="true"
+            oem_admin="true"
         fi
     fi
 
@@ -409,7 +409,7 @@ check_params() {
     # Check for interactive mode params
     # If none of the modes are given, default to oem-packages mode
     if [[ ${interactive_mode} == true ]]; then
-        if [[ -z "$shared_admin" && -z "$mount_packages" && -z "$oem_packages" ]]; then
+        if [[ -z "$oem_admin" && -z "$mount_packages" && -z "$oem_packages" ]]; then
             echo ""
             echo "Warning: No mode specified for interactive job. Defaulting to oem-packages mode."
             oem_packages=true
@@ -534,9 +534,9 @@ set_env_parameters() {
         env_parameters_array+=("MODE=mount_packages")
     elif [[ -n "$oem_packages" ]]; then
         env_parameters_array+=("MODE=oem_packages")
-    elif [[ -n "$shared_admin" ]]; then
+    elif [[ -n "$oem_admin" ]]; then
         env_parameters_array+=(
-            "MODE=shared_admin"
+            "MODE=oem_admin"
             "PIXI_HOME=/mnt/efs/shared/.pixi"
         )
     fi
@@ -724,7 +724,7 @@ prompt_user() {
 determine_running_jobs() {
     published_port=$(echo "$publish" | cut -d':' -f1)
     # Allowable combinations: oem-packages and mount-packages
-    if [[ -n "$shared_admin" ]]; then
+    if [[ -n "$oem_admin" ]]; then
         running_int_jobs=$("${float_executable}" list -a "${opcenter}" -f "status=Executing or status=Floating or status=Suspended or status=Suspending or status=Starting or status=Initializing" | awk '{print $4}' | grep -v -e '^$' -e 'NAME' || true)
         if [[ -n $running_int_jobs ]]; then
             int_job_count=$(echo "$running_int_jobs" | wc -l)
