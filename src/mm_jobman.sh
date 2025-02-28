@@ -575,7 +575,7 @@ determine_vm_policy() {
     local lowercase_vm_policy=""
 
     if [[ -z $vm_policy ]]; then
-        if [[ ${batch_mode} == "true" ]]; then
+        if [[ ${interactive_mode} == "true" ]]; then
             vm_policy_command="[onDemand=true]"
         else
             vm_policy_command="[spotOnly=true,retryInterval=900s]"
