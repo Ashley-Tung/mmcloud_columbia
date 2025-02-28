@@ -28,20 +28,24 @@ create_dir() {
     main_DIR=$1
     new_DIR=$2
     
-    sudo mkdir -p "${main_DIR}/${new_DIR}"
-    sudo chown -R mmc "${main_DIR}/${new_DIR}"
-    sudo chmod -R 777 "${main_DIR}/${new_DIR}"
-    sudo chgrp -R users "${main_DIR}/${new_DIR}"
+    if [ ! -d "${main_DIR}/${new_DIR}" ]; then
+        sudo mkdir -p "${main_DIR}/${new_DIR}"
+        sudo chown -R mmc "${main_DIR}/${new_DIR}"
+        sudo chmod -R 777 "${main_DIR}/${new_DIR}"
+        sudo chgrp -R users "${main_DIR}/${new_DIR}"
+    fi
 }
 
 create_file() {
     main_DIR=$1
     new_FILE=$2
     
-    sudo touch "${main_DIR}/${new_FILE}"
-    sudo chown mmc "${main_DIR}/${new_FILE}"
-    sudo chmod 777 "${main_DIR}/${new_FILE}"
-    sudo chgrp users "${main_DIR}/${new_FILE}"
+    if [ ! -f "${main_DIR}/${new_FILE}" ]; then
+        sudo touch "${main_DIR}/${new_FILE}"
+        sudo chown mmc "${main_DIR}/${new_FILE}"
+        sudo chmod 777 "${main_DIR}/${new_FILE}"
+        sudo chgrp users "${main_DIR}/${new_FILE}"
+    fi
 }
 
 # Make the directories if it does not exist already
