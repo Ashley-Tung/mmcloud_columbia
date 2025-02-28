@@ -506,7 +506,7 @@ mount_buckets() {
     # If more than one mount option, we expect there to be the same number of mounted buckets
     # TODO: Make endpoint a configurable setting
     for i in "${!mountOpt[@]}"; do
-        dataVolume_cmd+="--dataVolume '[${mountOpt[$i]},endpoint=s3.us-east-1.amazonaws.com]s3://${mount_remote[$i]}:${mount_local[$i]}' "
+        dataVolume_cmd+="--dataVolume [${mountOpt[$i]},endpoint=s3.us-east-1.amazonaws.com]s3://${mount_remote[$i]}:${mount_local[$i]} "
     done
 
     echo -e "${dataVolume_cmd}"
@@ -519,7 +519,7 @@ mount_volumes() {
     local folder="${ebs_mount[i]}"
     local size="${ebs_mount_size[i]}"
 
-    volumeMount_cmd+="--dataVolume '[size=$size]:$folder' "
+    volumeMount_cmd+="--dataVolume [size=$size]:$folder "
   done
 
   echo -e "${volumeMount_cmd}"
