@@ -125,6 +125,7 @@ else
       if is_available jupyter-lab; then
         echo "[$(date)]: JupyterLab is available. Starting JupyterLab ..."
         while true; do
+            export JUPYTER_CONFIG_DIR=$HOME/.jupyter
             jupyter-lab
             # Check if jupyter-lab exited with a non-zero exit code
             if [ $? -ne 0 ]; then
