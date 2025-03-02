@@ -108,6 +108,10 @@ create_upload_commands() {
 calculate_max_parallel_jobs_def=$(declare -f calculate_max_parallel_jobs)
 download_local_string=""
 upload_local_string=""
+download_mkdir=""
+download_cmd=""
+upload_mkdir=""
+upload_cmd=""
 
 while (( "$#" )); do
     case "$1" in
@@ -124,8 +128,10 @@ while (( "$#" )); do
         --no-fail) no_fail="$2"; shift 2;;
         --no-fail-parallel) no_fail_parallel="$2"; shift 2;;
         --parallel-commands) parallel_commands="$2"; shift 2;;
+        --*) echo "Unrecognized parameter $1"; exit 1;;
     esac 
 done
+
 
 # Only create download and upload commands if there are corresponding parameters
 if [[ -n ${download_local_string} ]]; then

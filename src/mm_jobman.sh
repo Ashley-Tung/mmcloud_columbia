@@ -60,6 +60,7 @@ declare -a upload_remote=()
 ide=""
 idle_time=7200
 publish=""
+publish_set=false
 suspend_off=""
 
 # Function to display usage information
@@ -296,6 +297,10 @@ check_conflicting_params() {
         fi
         if [[ "$entrypoint" != "" ]]; then
             conflicting_params+="--entrypoint "
+            is_conflicting=true
+        fi
+        if [[ "$ide" != "" ]]; then
+            conflicting_params+="--ide "
             is_conflicting=true
         fi
         conflicting_params=${conflicting_params%, }
@@ -541,6 +546,10 @@ set_env_parameters() {
         )
     fi
 
+    if [[ ${batch_mode} = true ]]; then
+        ide="batch"
+    fi
+
     # Build the float submit command as an array
     env_parameters_array+=(
         "GRANT_SUDO=yes"
@@ -652,16 +661,16 @@ submit_each_line_with_float() {
         fi
 
         # Begin jobs script with bind_mount.sh
-        printf "$script_dir/bind_mount.sh" > "${job_filename}"
+        cat "$script_dir/bind_mount.sh" > "${job_filename}"
 
         "${script_dir}/generate_job_script.sh" \
             --commands "${commands[*]// /;}" \
             --cwd "${cwd}" \
-            --download_local "${download_local[*]// /;}" \
-            --upload_local "${upload_local[*]// /;}" \
-            --download_remote "${download_remote[*]// /;}" \
-            --download_include "${download_include[*]// /;}" \
-            --upload_remote "${upload_remote[*]// /;}" \
+            --download-local "${download_local[*]// /;}" \
+            --upload-local "${upload_local[*]// /;}" \
+            --download-remote "${download_remote[*]// /;}" \
+            --download-include "${download_include[*]// /;}" \
+            --upload-remote "${upload_remote[*]// /;}" \
             --job-filename "${job_filename}" \
             --min-cores-per-command "${min_cores_per_command}" \
             --min-mem-per-command "${min_mem_per_command}" \
@@ -688,8 +697,8 @@ submit_each_line_with_float() {
             --job-script "${job_filename}" \
             --dryrun "${dryrun}" \
             --ide "batch" \
-            --env_parameters "${env_parameters// /;}" \
-            --extra_parameters "${extra_parameters// /;}" \
+            --env-parameters "${env_parameters// /;}" \
+            --extra-parameters "${extra_parameters// /;}" \
             --job-name "${job_name}_${j}"
 
         rm -rf "${TMPDIR:-/tmp}/${script_file%.*}"
@@ -814,8 +823,8 @@ submit_interactive_job() {
         --host-script "${host_script}" \
         --job-script "${script_dir}/bind_mount.sh" \
         --dryrun "${dryrun}" \
-        --env_parameters "${env_parameters// /;}" \
-        --extra_parameters "${extra_parameters// /;}" \
+        --env-parameters "${env_parameters// /;}" \
+        --extra-parameters "${extra_parameters// /;}" \
         --ide "${ide}" \
         --job-name "${job_name}" \
         --verbose

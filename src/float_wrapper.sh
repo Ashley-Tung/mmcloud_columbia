@@ -102,8 +102,8 @@ while (( "$#" )); do
         --job-script) job_script="$2"; shift 2;;
         # Miscellaneous parameters
         --dryrun) dryrun="$2"; shift 2;;
-        --extra_parameters) extra_parameters="${2//;/ }"; shift 2;;
-        --env_parameters) env_parameters="${2//;/ }"; shift 2;;
+        --extra-parameters) extra_parameters="${2//;/ }"; shift 2;;
+        --env-parameters) env_parameters="${2//;/ }"; shift 2;;
         --ide) ide="${2}"; shift 2;;
         --job-name) job_name="$2"; shift 2;;
         --verbose) verbose=true; shift;;
