@@ -457,24 +457,10 @@ login() {
     local address=""
     echo ""
 
-    # For batch job
-    if [[ "$batch_mode" == "true" ]]; then
-        output=$($float_executable login --info)
-        address=$(echo "$output" | grep -o 'address: [0-9.]*' | awk '{print $2}')
-        if [ "$address" == "" ];then
-            echo -e "\n[ERROR] No opcenter logged in to. Did you log in?"
-            exit 1
-        fi
-        if [ "$opcenter" != "$address" ]; then
-            echo -e "\n[ERROR] The provided opcenter address $opcenter does not match the logged in opcenter $address. Please log in to $opcenter."
-            exit 1
-        fi
-        # If login was successful, save the float username
-        user=$(echo "$output" | grep 'username' | awk '{print $2}')
-    fi
+    output=$($float_executable login --info 2>&1 || true)
+    address=$(echo "$output" | grep -o 'address: [0-9.]*' | awk '{print $2}' || true)
 
-    # For interactive job
-    if [[ "$interactive_mode" == "true" ]]; then
+    if [ "$address" == "" ]; then
         if [[ -z "$user" ]]; then
             read -rp "Enter user for $opcenter: " user
         fi
@@ -482,14 +468,19 @@ login() {
             read -rsp "Enter password for $opcenter: " password
             echo ""
         fi
-        "$float_executable" login -a "$opcenter" -u "$user" -p "$password"
-    fi
 
-    # If error returned by login, exit the script
-    if [[ "$?" != 0 ]]; then
-        echo ""
-        echo "Error: Login failed. Please check username and password"
+        # If error returned by login, exit the script
+        if ! "$float_executable" login -a "$opcenter" -u "$user" -p "$password"; then
+            echo ""
+            echo "Error: Login failed. Please check username and password"
+            exit 1
+        fi
+    elif [ "$opcenter" != "$address" ]; then
+        echo -e "\n[ERROR] The provided opcenter address $opcenter does not match the logged in opcenter $address. Please log in to $opcenter."
         exit 1
+    else
+        # If login was successful, save the float username
+        user=$(echo "$output" | grep 'username' | awk '{print $2}')
     fi
 }
 
