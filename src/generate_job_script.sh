@@ -115,7 +115,9 @@ upload_cmd=""
 
 while (( "$#" )); do
     case "$1" in
-        --commands) commands_string="$2"; shift 2;;
+        --script_file) script_file="$2"; shift 2;;
+        --start) start="$2"; shift 2;;
+        --end) end="$2"; shift 2;;
         --cwd) cwd="$2"; shift 2;;
         --download-local) download_local_string="$2"; shift 2;;
         --upload-local) upload_local_string="$2"; shift 2;;
@@ -132,7 +134,6 @@ while (( "$#" )); do
     esac 
 done
 
-
 # Only create download and upload commands if there are corresponding parameters
 if [[ -n ${download_local_string} ]]; then
     download_cmd=$(create_download_commands)
@@ -147,9 +148,9 @@ if [[ -n ${upload_local_string} ]]; then
     upload_cmd=$(echo -e "$upload_cmd" | grep -v 'mkdir')
 fi
 
-IFS=';' read -ra commands <<< "${commands_string}"
+eof="EOF"
 
-submission_script=$(cat << EOF
+tee -a ${job_filename} >/dev/null << EOF
 # Function definition for calculate_max_parallel_jobs
 ${calculate_max_parallel_jobs_def}
 
@@ -176,13 +177,15 @@ echo "Maximum parallel jobs: \$num_parallel_commands"
 command_failed=0
 
 # Conditional execution based on num_parallel_commands and also length of commands
-commands_to_run=(${commands[@]})
-if [[ \$num_parallel_commands -gt 1 && ${#commands[*]} -gt 1 ]]; then
-    printf "%%s\\\\n" "\${commands_to_run[@]}"  | parallel -j \$num_parallel_commands ${no_fail_parallel}
+cmd_script=\$(mktemp -d)/cmds.sh
+tee \${cmd_script} >/dev/null << ${eof}
+$(sed '/^\s*$/d' "${script_file}" | sed -n "${start},${end}p")
+${eof}
+
+if [[ \$num_parallel_commands -gt 1 && \$(wc -l \${cmd_script}) -gt 1 ]]; then
+    parallel -j \$num_parallel_commands ${no_fail_parallel} < \${cmd_script}
 else
-    printf "%%s\\\\n" "\${commands_to_run[@]}" | while IFS= read -r cmd; do
-        eval \$cmd ${no_fail}
-    done
+    bash \${cmd_script} ${no_fail}
 fi
 
 # Always execute the upload commands to upload data to S3
@@ -193,7 +196,3 @@ if [ \$command_failed -eq 1 ]; then
     exit 1
 fi
 EOF
-)
-
-# Append job specific code
-printf "${submission_script}" >> "${job_filename}"

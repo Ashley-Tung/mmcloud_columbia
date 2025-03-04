@@ -74,6 +74,7 @@ get_jupyter_token() {
 }
 
 dryrun=""
+gateway=""
 image_vol_size=""
 root_vol_size=""
 publish=""
@@ -115,7 +116,6 @@ float_args+=(
     "-a" "$opcenter"
     "-i" "$image" "-c" "$core" "-m" "$mem"
     "--vmPolicy" "$vm_policy"
-    "--gateway" "$gateway"
     "--securityGroup" "$securityGroup"
     "--migratePolicy" "[disable=true,evadeOOM=false]"
     "--withRoot"
@@ -138,6 +138,12 @@ fi
 if [[ -n  "${root_vol_size}" ]]; then
     float_args+=(
         "--rootVolSize" "${root_vol_size}"
+    )
+fi
+
+if [[ -n "${gateway}" ]]; then
+    float_args+=(
+        "--gateway" "$gateway"
     )
 fi
 

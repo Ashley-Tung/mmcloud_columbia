@@ -616,33 +616,13 @@ submit_each_line_with_float() {
         return 0
     fi
 
-    # Read all lines from the script file into an array
-    all_commands=()
-    total_commands=0
-    while IFS= read -r line; do
-        if [ -z "$line" ]; then
-            continue  # Skip empty lines
-        fi
-        all_commands+=("$line")
-        total_commands=$(( total_commands + 1))  
-    done < <(sed -e '$a\' "${script_file}") # always add a newline to the end of file before sending it in
-
     # Divide the commands into jobs based on job-size
+    total_commands=$(grep -cve '^\s*$' ${script_file})
     num_jobs=$(( (total_commands + job_size - 1) / job_size )) # Ceiling division
 
     # Loop to create job submission commands
     for (( j = 0; j < num_jobs; j++ )); do
-        # Using a sliding-window effect, take the next job_size number of jobs
-        start=$((j * job_size))
-        end=$((start + job_size - 1))
-
-        commands=()
-        i=$start
-        while [[ $i -le $end && $i -lt ${#all_commands[*]} ]]; do
-          commands+=("\"${all_commands[$i]}\"")
-          i=$(( i + 1 ))
-        done
-
+        # Generate path to job script
         if [ "$dryrun" = true ]; then
             full_cmd+="#-------------\n"
             job_filename=${script_file%.*}_"$j".mmjob.sh 
@@ -651,11 +631,17 @@ submit_each_line_with_float() {
             job_filename="${TMPDIR:-/tmp}/${script_file%.*}/${j}.mmjob.sh"
         fi
 
+        # Using a sliding-window effect, take the next job_size number of jobs
+        start=$(((j * job_size) + 1))
+        end=$((start + job_size - 1))
+
         # Begin jobs script with bind_mount.sh
         cat "$script_dir/bind_mount.sh" > "${job_filename}"
 
         "${script_dir}/generate_job_script.sh" \
-            --commands "${commands[*]// /;}" \
+            --script_file "${script_file}" \
+            --start "${start}" \
+            --end "${end}" \
             --cwd "${cwd}" \
             --download-local "${download_local[*]// /;}" \
             --upload-local "${upload_local[*]// /;}" \
@@ -675,7 +661,6 @@ submit_each_line_with_float() {
         "${script_dir}/float_wrapper.sh" \
             --float-executable "${float_executable}" \
             --opcenter "${opcenter}" \
-            --gateway "${gateway}" \
             --image "${image}" \
             --core "${core}" \
             --mem "${mem}" \
