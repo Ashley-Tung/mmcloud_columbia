@@ -55,63 +55,61 @@ create_download_commands() {
     IFS=';' read -ra download_include <<< "${download_include_string}"
     IFS=';' read -ra download_remote <<< "${download_remote_string}"
 
-    local download_cmd=""
+    local download_cmd_string=""
 
     for i in "${!download_local[@]}"; do
         # If local folder has a trailing slash, we are copying into a folder, therefore we make the folder
         if [[ ${download_local[$i]} =~ /$ ]]; then
-        download_cmd+="mkdir -p ${download_local[$i]%\/}\n"
+            echo "mkdir -p ${download_local[$i]%\/}" >> "${download_mkdir}"
         fi
-        download_cmd+="aws s3 cp s3://${download_remote[$i]} ${download_local[$i]} --recursive"
+        download_cmd_string="aws s3 cp s3://${download_remote[$i]} ${download_local[$i]} --recursive"
 
         # Separate include commands with space
         if [ ${#download_include[@]} -gt 0 ]; then
         # Split by space
-        IFS=' ' read -ra INCLUDES <<< "${download_include[$i]}"
+        IFS='|' read -ra INCLUDES <<< "${download_include[$i]}"
         if [ ${#INCLUDES[@]} -gt 0 ]; then
             # If an include command is used, we want to make sure we don't include the entire folder
-            download_cmd+=" --exclude '*'"
+            download_cmd_string+=" --exclude '*'"
         fi
         for j in "${!INCLUDES[@]}"; do
-            download_cmd+=" --include '${INCLUDES[$j]}'"
+            download_cmd_string+=" --include '${INCLUDES[$j]}'"
         done
         fi
-        download_cmd+="\n"
+        echo "${download_cmd_string}" >> "${download_cmd}"
     done
-
-    download_cmd=${download_cmd%\\n}
-    echo -e "${download_cmd}"
 }
 
 create_upload_commands() {
     IFS=';' read -ra upload_local <<< "${upload_local_string}"
     IFS=';' read -ra upload_remote <<< "${upload_remote_string}"
 
-    local upload_cmd=""
     local last_folder=""
 
     for i in "${!upload_local[@]}"; do
-        upload_cmd+="mkdir -p ${upload_local[$i]%\/}\n"
+        echo "mkdir -p ${upload_local[$i]%\/}" >> "${upload_mkdir}"
         local upload_folder=${upload_remote[$i]%\/}
         if [[ ${upload_local[$i]} =~ /$ ]]; then
-            upload_cmd+="aws s3 sync ${upload_local[$i]} s3://${upload_folder}\n"
+            echo "aws s3 sync ${upload_local[$i]} s3://${upload_folder}" >> "${upload_cmd}"
         else  
             last_folder=$(basename "${upload_local[$i]}")
-            upload_cmd+="aws s3 sync ${upload_local[$i]} s3://${upload_folder}/$last_folder\n"
+            echo "aws s3 sync ${upload_local[$i]} s3://${upload_folder}/$last_folder" >> "${upload_cmd}"
         fi
     done
-
-    upload_cmd=${upload_cmd%\\n}
-    echo -e "${upload_cmd}"
 }
 
 calculate_max_parallel_jobs_def=$(declare -f calculate_max_parallel_jobs)
 download_local_string=""
 upload_local_string=""
-download_mkdir=""
-download_cmd=""
-upload_mkdir=""
-upload_cmd=""
+temp_dir=$(mktemp -d)
+download_mkdir="${temp_dir}/download_mkdir"
+download_cmd="${temp_dir}/download_cmd"
+upload_mkdir="${temp_dir}/upload_mkdir"
+upload_cmd="${temp_dir}/upload_cmd"
+touch "${download_cmd}"
+touch "${download_mkdir}"
+touch "${upload_cmd}"
+touch "${upload_mkdir}"
 
 while (( "$#" )); do
     case "$1" in
@@ -136,33 +134,27 @@ done
 
 # Only create download and upload commands if there are corresponding parameters
 if [[ -n ${download_local_string} ]]; then
-    download_cmd=$(create_download_commands)
-    # Separate out the mkdir commands
-    download_mkdir=$(echo -e "$download_cmd" | grep 'mkdir')
-    upload_mkdir=$(echo -e "$upload_cmd" | grep 'mkdir')
+    create_download_commands
 fi
 if [[ -n ${upload_local_string} ]]; then
-    upload_cmd=$(create_upload_commands)
-    # Remove mkdir commands from the original command
-    download_cmd=$(echo -e "$download_cmd" | grep -v 'mkdir')
-    upload_cmd=$(echo -e "$upload_cmd" | grep -v 'mkdir')
+    create_upload_commands
 fi
 
 eof="EOF"
 
-tee -a ${job_filename} >/dev/null << EOF
+tee -a "${job_filename}" >/dev/null << EOF
 # Function definition for calculate_max_parallel_jobs
 ${calculate_max_parallel_jobs_def}
 
 # Create directories if they don't exist for download
-${download_mkdir}
+$(cat "${download_mkdir}")
 # Create directories if they don't exist for upload
-${upload_mkdir}
+$(cat "${upload_mkdir}")
 # Create directories if they don't exist for cwd
 mkdir -p ${cwd}
 
 # Execute the download commands to fetch data from S3
-${download_cmd}
+$(cat "${download_cmd}")
 
 # Change to the specified working directory
 cd ${cwd}
@@ -189,7 +181,7 @@ else
 fi
 
 # Always execute the upload commands to upload data to S3
-${upload_cmd}
+$(cat "${upload_cmd}")
 
 # Check if any command failed
 if [ \$command_failed -eq 1 ]; then

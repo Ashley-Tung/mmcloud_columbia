@@ -171,7 +171,7 @@ while (( "$#" )); do
             while [ $# -gt 0 ] && [[ $1 != -* ]]; do
                 IFS='' read -ra ARG <<< "$1"
                 if [ "$current_flag" == "--download-include" ]; then
-                    download_include+=("${ARG[0]}")
+                    download_include+=("${ARG[0]// /|}")
                 elif [ "$current_flag" == "--mountOpt" ]; then
                     mountOpt+=("${ARG[0]}")
                 elif [ "$current_flag" == "--env" ]; then
@@ -617,7 +617,7 @@ submit_each_line_with_float() {
     fi
 
     # Divide the commands into jobs based on job-size
-    total_commands=$(grep -cve '^\s*$' ${script_file})
+    total_commands=$(grep -cve '^\s*$' "${script_file}")
     num_jobs=$(( (total_commands + job_size - 1) / job_size )) # Ceiling division
 
     # Loop to create job submission commands
@@ -643,11 +643,11 @@ submit_each_line_with_float() {
             --start "${start}" \
             --end "${end}" \
             --cwd "${cwd}" \
-            --download-local "${download_local[*]// /;}" \
-            --upload-local "${upload_local[*]// /;}" \
-            --download-remote "${download_remote[*]// /;}" \
-            --download-include "${download_include[*]// /;}" \
-            --upload-remote "${upload_remote[*]// /;}" \
+            --download-local "$(echo "${download_local[@]}" | tr ' ' ';')" \
+            --upload-local "$(echo "${upload_local[@]}" | tr ' ' ';')" \
+            --download-remote "$(echo "${download_remote[@]}" | tr ' ' ';')" \
+            --download-include "$(echo "${download_include[@]}" | tr ' ' ';')" \
+            --upload-remote "$(echo "${upload_remote[@]}" | tr ' ' ';')" \
             --job-filename "${job_filename}" \
             --min-cores-per-command "${min_cores_per_command}" \
             --min-mem-per-command "${min_mem_per_command}" \
